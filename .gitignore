@@ -1,4 +1,7 @@
-evaluation_data/
+evaluation_data/*
+!evaluation_data/raw/
+evaluation_data/raw/*
+!evaluation_data/raw/.gitkeep
 cleaned_data/
 *.csv
 *.xlsx
