@@ -16,6 +16,9 @@ Cleaning code for the **DOCCLA COPD Evaluation data**.
 
 **One-time setup:**
 1. Download or clone this repository to your machine.
+```
+$ git clone https://github.com/Em-Costello/Evaluation_cleaning_pipeline.git
+```
 2. Open a terminal (Command Prompt on Windows, Terminal on Mac) and navigate into the repository folder.
 3. Install the required packages:
 ```
@@ -42,7 +45,7 @@ To run only the checks (e.g. when a new extract arrives): `python run_pipeline.p
 
 **`check_inputs.py`** (run automatically by `run_pipeline.py`)
 
-Flattens each raw extract in memory (exactly as `flatten_headers.py` does) and runs every check the cleaning step would, but reports **all** problems across **all** files at once rather than stopping at the first one:
+Flattens each raw extract in memory and runs every check the cleaning step would, but reports **all** problems across **all** files at once rather than stopping at the first one:
 
 - **Columns** — missing, unexpected or out-of-order columns compared with `NEW_EXPECTED_COLUMNS`, with "did you mean" suggestions for renamed headers.
 - **Row structure** — anchor rows, NHS Number presence, checksum and duplicates, and patient-level fields appearing on detail rows (reported as line numbers in the flattened CSV; NHS numbers are never printed).
@@ -57,7 +60,9 @@ Outputs `qa_reports/preflight_report.txt` and, if needed, `qa_reports/unmapped_v
 python check_inputs.py                       # every .xlsx in evaluation_data/raw/
 python check_inputs.py path/to/WHC_GP01.xlsx
 ```
-
+or 
+```
+python run_pipeline.py --check_only
 ---
 
 ## 2. Flatten Headers
@@ -92,7 +97,7 @@ python flatten_headers.py input.xlsx output.csv --start-row 5
 
 **`headers_template.xlsx`**
 
-Shows the expected header structure and column order that `flatten_headers.py` and `clean_copd_dataset.py` are built to handle — the two-row group/sub-field layout described above, laid out exactly as it should appear in a raw GP extract.
+Shows the expected header structure and column order that `flatten_headers.py` and `clean_copd_dataset.py` are built to handle — the two-row group/sub-field layout described above, laid out exactly as it should appear in a raw GP extract. **This is specific to the Doccla evaulation data**.
 
 Use this as a reference when:
 - Checking whether a new GP surgery's extract matches the expected structure before running the pipeline on it.

@@ -2,7 +2,7 @@
 """
 check_inputs.py
 
-Pre-run checks on raw GP extracts (.xlsx). Replaces diagnose_structure.py.
+Pre-run checks on raw GP extracts (.xlsx). 
 
 For each file it flattens the headers (in memory, exactly as flatten_headers.py
 would) and then runs every check the cleaning script would run, but reports ALL
