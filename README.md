@@ -17,7 +17,7 @@ Cleaning code for the **DOCCLA COPD Evaluation data**.
 **One-time setup:**
 1. Download or clone this repository to your machine.
 ```
-$ git clone https://github.com/Em-Costello/Evaluation_cleaning_pipeline.git
+git clone https://github.com/Em-Costello/Evaluation_cleaning_pipeline.git
 ```
 2. Open a terminal (Command Prompt on Windows, Terminal on Mac) and navigate into the repository folder.
 3. Install the required packages:
