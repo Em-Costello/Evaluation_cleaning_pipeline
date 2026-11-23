@@ -121,7 +121,7 @@ GP_SOURCES = [
 ]
 ```
 
-All per-file cleaning logic lives in `process_gp_file(gp_id, source_file)`, which is run once per entry in `GP_SOURCES`. To add a new surgery, add a row to `GP_SOURCES` — no other code changes are needed, provided the extract matches the expected column structure. Every error raised inside `process_gp_file` is prefixed with the `gp_id`, so a failure is immediately traceable to the offending file even when several GPs are processed in one run.
+All per-file cleaning logic lives in `process_gp_file(gp_id, source_file)`, which is run once per entry in `GP_SOURCES`. To add a new surgery, add another data file to <evaluation_data/raw/> using the naming convention 'X_GPID.xslx', where X is a combination of letters that tell you intuitively which GP it is, and a ID is a combination of digits. Ensure that this dataset matches the expected column structure. The pipeline will detect the ID, and every error raised inside `process_gp_file` is prefixed with the `gp_id`, so a failure is immediately traceable to the offending file even when several GPs are processed in one run.
 
 The categorical mapping files (COPD diagnosis, gender, ethnicity — see 3.2) are loaded once, outside `process_gp_file`, and shared read-only across all GP files in the run.
 
