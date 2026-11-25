@@ -8,6 +8,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
+import deprivation as dep
+
 NEW_EXPECTED_COLUMNS = [ # CHANGE IF THE SOURCE FILE STRUCTURE CHANGES
     'NHS Number', 'Date of Birth', 'Age', 'Gender', 'Postcode',
     'Ethnic Origin', 'Clinical Codes - Code Term', 'Clinical Codes - Date',
@@ -105,6 +107,12 @@ GP_SOURCES = [
     {'gp_id': 'GP06', 'source_file': 'evaluation_data/flattened/VS_GP06.csv'},
     
 ]
+
+# ---------- Deprivation (optional) ----------
+# Only used when this script is run directly. With run_pipeline.py, use the
+# --deprivation (and optionally --imd-version) flags instead.
+RUN_DEPRIVATION = False
+IMD_VERSION = dep.IMD_VERSION
 
 # ---------- Load categorical mappings once (shared across all GP files) ----------
 def load_mapping(filename):
@@ -558,9 +566,10 @@ def _write_table_sheet(wb, sheet_title, df):
     return ws
 
 
-def save_excel_workbook(tables, gp_sources, output_path):
+def save_excel_workbook(tables, gp_sources, output_path, notes=None):
     """Combine every cleaned table into one workbook: a Summary index sheet
-    followed by one formatted, filterable sheet per table."""
+    followed by one formatted, filterable sheet per table.
+    notes: optional extra lines shown under the GP list on the Summary sheet."""
     wb = Workbook()
     wb.remove(wb.active)  # drop the default blank sheet
 
@@ -571,10 +580,14 @@ def save_excel_workbook(tables, gp_sources, output_path):
     summary['A2'].font = BODY_FONT
     summary.append([f'GP surgeries included: {", ".join(g["gp_id"] for g in gp_sources)}'])
     summary['A3'].font = BODY_FONT
+    for note in notes or []:
+        summary.append([note])
+        summary.cell(row=summary.max_row, column=1).font = BODY_FONT
     summary.append([])
 
     header_row = ['Sheet', 'Row Count', 'Description']
     summary.append(header_row)
+    header_row_idx = summary.max_row
     for cell in summary[summary.max_row]:
         cell.font = HEADER_FONT
         cell.fill = HEADER_FILL
@@ -589,7 +602,7 @@ def save_excel_workbook(tables, gp_sources, output_path):
     summary.column_dimensions['A'].width = 28
     summary.column_dimensions['B'].width = 12
     summary.column_dimensions['C'].width = 70
-    summary.freeze_panes = 'A6'
+    summary.freeze_panes = f'A{header_row_idx + 1}'
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     wb.save(output_path)
@@ -604,10 +617,33 @@ TABLE_NAMES = [
 ]
 
 
-def run(gp_sources):
+def add_deprivation_to_patients(patients_df, imd_version):
+    """Section 8.5: add LSOA + IMD fields to the combined patients table.
+    Loads the (large) lookup and IMD files once, for all GPs together.
+    Bad/missing postcodes are flagged in Deprivation_Match_Status, never raised.
+    Returns (patients_df with new columns, line for the workbook Summary sheet)."""
+    print("\n---------- Deprivation indices ----------")
+    ref = dep.load_reference_data(imd_version)
+    patients_df = dep.add_deprivation(patients_df, 'Postcode', ref['lookup'], ref['imd'], imd_version)
+    counts = dep.summarise_matches(patients_df, ref['lookup_path'], ref['imd_path'],
+                                   imd_version, group_col='GP_ID')
+    note = (f"Deprivation: IMD {imd_version} added to Patients sheet - "
+            f"{counts['matched']} of {counts['provided']} patients with a postcode matched "
+            f"(postcode lookup: {ref['lookup_path'].name}). "
+            f"See Deprivation_Match_Status for why any are blank.")
+    return patients_df, note
+
+
+def run(gp_sources, deprivation=False, imd_version=dep.IMD_VERSION):
     """Clean every GP file in gp_sources and save the combined CSVs + workbook.
     gp_sources: list of {'gp_id': ..., 'source_file': ...} (paths may be
-    relative to the repository folder)."""
+    relative to the repository folder).
+    deprivation: if True, add LSOA + IMD fields to the patients table."""
+    # Cheap check up front so a missing lookup/IMD file stops the run before
+    # any cleaning, not after it.
+    if deprivation:
+        dep.preflight(imd_version)
+
     gp_sources = [
         {**gp, 'source_file': str(BASE_DIR / gp['source_file'])} for gp in gp_sources
     ]
@@ -628,6 +664,13 @@ def run(gp_sources):
             f"({gp_ids_involved}) - review before treating Patient_ID as a unique key."
         )
 
+    # ---------- 8.5 Deprivation indices (optional, --deprivation) ----------
+    if deprivation:
+        tables['patients'], deprivation_note = add_deprivation_to_patients(patients_df, imd_version)
+        patients_df = tables['patients']
+    else:
+        deprivation_note = "Deprivation: not run (use run_pipeline.py --deprivation to add IMD fields)."
+
     # ---------- 9. Save + summary ----------
     # CSVs kept as-is for the pipeline/version control; the Excel workbook below
     # is the analyst-facing deliverable (NHS workers who work in Excel, not Python).
@@ -636,7 +679,7 @@ def run(gp_sources):
         t.to_csv(OUTPUT_DIR / f'copd_{name}.csv', index=False)
         print(f"{name}: {t.shape}")
 
-    save_excel_workbook(tables, gp_sources, OUTPUT_XLSX)
+    save_excel_workbook(tables, gp_sources, OUTPUT_XLSX, notes=[deprivation_note])
 
     print(f"\nTotal GPs processed: {len(gp_sources)}")
     print(f"Total patients: {len(patients_df)}")
@@ -645,6 +688,6 @@ def run(gp_sources):
 
 if __name__ == '__main__':
     try:
-        run(GP_SOURCES)
+        run(GP_SOURCES, deprivation=RUN_DEPRIVATION, imd_version=IMD_VERSION)
     except ValueError as e:
         sys.exit(f"\nPIPELINE STOPPED:\n{e}")
