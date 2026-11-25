@@ -395,7 +395,10 @@ def process_gp_file(gp_id, source_file):
     text_mentioned = pd.Series(False, index=df.index)
     text_mention_date = pd.Series(pd.NaT, index=df.index)
     for dose_col, date_col in RESCUE_PACK_COL_PAIRS:
-        match = df[dose_col].str.contains('rescue pack', case=False, na=False)
+        # A completely blank dose column is read as float (all NaN), which has
+        # no .str accessor - cast to string first so surgeries with no dose
+        # text at all don't crash.
+        match = df[dose_col].astype('string').str.contains('rescue pack', case=False, na=False)
         text_mentioned |= match
         text_mention_date = text_mention_date.mask(match, df[date_col])
 
@@ -417,14 +420,14 @@ def process_gp_file(gp_id, source_file):
     # Union: a (Patient_ID, date) counts once even if flagged by both signals
     rescue_pack_events = text_events | inferred_events
 
-    rescue_pack_counts = (
-        pd.Series([pid for pid, _ in rescue_pack_events], name='Patient_ID')
-        .value_counts()
-        .rename('Evidence_of_Rescue_Pack')
+    # Map rather than merge, so a surgery with zero rescue-pack events (empty
+    # counts Series) can't cause a dtype mismatch on the join key.
+    rescue_pack_counts = pd.Series(
+        [pid for pid, _ in rescue_pack_events], dtype=object
+    ).value_counts()
+    patients_df['Evidence_of_Rescue_Pack'] = (
+        patients_df['Patient_ID'].map(rescue_pack_counts).fillna(0).astype(int)
     )
-
-    patients_df = patients_df.merge(rescue_pack_counts, on='Patient_ID', how='left')
-    patients_df['Evidence_of_Rescue_Pack'] = patients_df['Evidence_of_Rescue_Pack'].fillna(0).astype(int)
 
     # ---------- 5.7 Vaccinated (Y/N) flags onto patients_df ----------
     vaccination_specs = [
