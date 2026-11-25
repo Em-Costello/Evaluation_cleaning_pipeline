@@ -12,6 +12,8 @@ These files control how raw values from GP records get translated into standard 
 - **If a value in the data isn't in the mapping file, the pipeline will stop and show an error rather than guessing or skipping it.** This is intentional — it's there to make sure nothing gets mapped incorrectly or silently miscategorised. If you see an error like this, it usually means a new raw value needs to be added to the mapping file.
 - Every value should map to exactly one category — don't map the same raw value to two different categories, or leave a category blank.
 
+- **`deprivation_indices/imd_field_mapping.csv`** works differently: it lists every field in the IMD 2025 file. Set `include` to `Yes` for each field you want added to the Patients table, and `output_name` controls the column name (prefixed with `IMD2025_`). Don't change `source_column` - it must match the IMD file's header exactly.
+
 ---
 
 ### Ethnicity mapping
