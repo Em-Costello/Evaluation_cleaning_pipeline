@@ -223,6 +223,10 @@ LSOAs or other row-level values are printed.
 #     add_deprivation() on the COMBINED patients table (all GPs together),
 #     not inside the per-GP loop. The summary is broken down by GP_ID so a
 #     surgery with a poor match rate is easy to spot.
+#   - Outputs: the IMD decile is added to the Patients table; everything
+#     else (LSOA, input type, match status, all chosen IMD fields) goes in a
+#     separate Deprivation table (copd_deprivation.csv + 'Deprivation' sheet,
+#     one row per patient, joined to Patients on Patient_ID + GP_ID).
 #   - DeprivationSetupError is a ValueError, so the pipeline's existing
 #     'PIPELINE STOPPED' handling catches it.
 #   - Input from Excel as well as CSV (standalone run): choose reader by file
@@ -524,15 +528,26 @@ def load_imd(version: int, folder: Path, mapping_file: Path) -> tuple:
 # =============================================================================
 
 def preflight(version: int, folder: Path = DEPRIVATION_MAPPING_DIR,
-              mapping_file: Path = IMD_FIELD_MAPPING_FILE) -> tuple:
+              mapping_file: Path = IMD_FIELD_MAPPING_FILE,
+              required_outputs=()) -> tuple:
     '''Cheap checks (no big files loaded): version supported, lookup + IMD
-    file + field mapping all present. Returns (lookup path, IMD path).
-    Raises DeprivationSetupError if anything is missing.'''
+    file + field mapping all present, and every output_name in
+    required_outputs (e.g. ['Decile']) set to include=Yes in the mapping.
+    Returns (lookup path, IMD path). Raises DeprivationSetupError if not.'''
     check_imd_version(version)
     lookup_path = find_latest_lookup(folder)
     imd_path = find_imd_file(version, folder)
     if not mapping_file.exists():
         raise DeprivationSetupError(f'IMD field mapping file not found: {mapping_file}')
+    if required_outputs:
+        mapping = pd.read_csv(mapping_file, dtype=str).apply(lambda c: c.str.strip())
+        included = mapping[(mapping['imd_version'] == str(version))
+                           & mapping['include'].str.lower().isin(['yes', 'y', 'true', '1'])]
+        not_included = [o for o in required_outputs if o not in set(included['output_name'])]
+        if not_included:
+            raise DeprivationSetupError(
+                f'{mapping_file.name}: {not_included} must be set to include=Yes for IMD '
+                f'{version} - the pipeline adds it to the Patients sheet.')
     return lookup_path, imd_path
 
 

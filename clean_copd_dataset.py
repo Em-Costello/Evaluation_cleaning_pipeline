@@ -113,6 +113,9 @@ GP_SOURCES = [
 # --deprivation (and optionally --imd-version) flags instead.
 RUN_DEPRIVATION = False
 IMD_VERSION = dep.IMD_VERSION
+# IMD fields (output_name in imd_field_mapping.csv) copied onto the Patients
+# table. Everything else goes in the separate Deprivation table only.
+PATIENT_IMD_FIELDS = ['Decile']
 
 # ---------- Load categorical mappings once (shared across all GP files) ----------
 def load_mapping(filename):
@@ -395,10 +398,7 @@ def process_gp_file(gp_id, source_file):
     text_mentioned = pd.Series(False, index=df.index)
     text_mention_date = pd.Series(pd.NaT, index=df.index)
     for dose_col, date_col in RESCUE_PACK_COL_PAIRS:
-        # A completely blank dose column is read as float (all NaN), which has
-        # no .str accessor - cast to string first so surgeries with no dose
-        # text at all don't crash.
-        match = df[dose_col].astype('string').str.contains('rescue pack', case=False, na=False)
+        match = df[dose_col].str.contains('rescue pack', case=False, na=False)
         text_mentioned |= match
         text_mention_date = text_mention_date.mask(match, df[date_col])
 
@@ -420,14 +420,14 @@ def process_gp_file(gp_id, source_file):
     # Union: a (Patient_ID, date) counts once even if flagged by both signals
     rescue_pack_events = text_events | inferred_events
 
-    # Map rather than merge, so a surgery with zero rescue-pack events (empty
-    # counts Series) can't cause a dtype mismatch on the join key.
-    rescue_pack_counts = pd.Series(
-        [pid for pid, _ in rescue_pack_events], dtype=object
-    ).value_counts()
-    patients_df['Evidence_of_Rescue_Pack'] = (
-        patients_df['Patient_ID'].map(rescue_pack_counts).fillna(0).astype(int)
+    rescue_pack_counts = (
+        pd.Series([pid for pid, _ in rescue_pack_events], name='Patient_ID')
+        .value_counts()
+        .rename('Evidence_of_Rescue_Pack')
     )
+
+    patients_df = patients_df.merge(rescue_pack_counts, on='Patient_ID', how='left')
+    patients_df['Evidence_of_Rescue_Pack'] = patients_df['Evidence_of_Rescue_Pack'].fillna(0).astype(int)
 
     # ---------- 5.7 Vaccinated (Y/N) flags onto patients_df ----------
     vaccination_specs = [
@@ -515,6 +515,7 @@ SHEET_LABELS = {
     'influenza_vaccinations': 'Influenza Vaccinations',
     'pneumococcal_vaccinations': 'Pneumococcal Vaccs',
     'covid_vaccinations': 'COVID Vaccinations',
+    'deprivation': 'Deprivation',
 }
 
 SHEET_DESCRIPTIONS = {
@@ -527,6 +528,9 @@ SHEET_DESCRIPTIONS = {
     'influenza_vaccinations': 'One row per influenza vaccination record.',
     'pneumococcal_vaccinations': 'One row per pneumococcal vaccination record.',
     'covid_vaccinations': 'One row per COVID vaccination record.',
+    'deprivation': ('One row per patient: LSOA, match status and Index of Multiple '
+                    'Deprivation scores, ranks and deciles (1 = most deprived). '
+                    'Only present when run with --deprivation.'),
 }
 
 
@@ -620,32 +624,46 @@ TABLE_NAMES = [
 ]
 
 
-def add_deprivation_to_patients(patients_df, imd_version):
-    """Section 8.5: add LSOA + IMD fields to the combined patients table.
+def build_deprivation_table(patients_df, imd_version):
+    """Section 8.5: postcode -> LSOA -> IMD for the combined patients table.
     Loads the (large) lookup and IMD files once, for all GPs together.
     Bad/missing postcodes are flagged in Deprivation_Match_Status, never raised.
-    Returns (patients_df with new columns, line for the workbook Summary sheet)."""
+
+    Returns (patients_df with the PATIENT_IMD_FIELDS added,
+             deprivation_df - one row per patient with LSOA, input type,
+                              match status and every chosen IMD field,
+             line for the workbook Summary sheet)."""
     print("\n---------- Deprivation indices ----------")
     ref = dep.load_reference_data(imd_version)
-    patients_df = dep.add_deprivation(patients_df, 'Postcode', ref['lookup'], ref['imd'], imd_version)
-    counts = dep.summarise_matches(patients_df, ref['lookup_path'], ref['imd_path'],
+    enriched = dep.add_deprivation(patients_df[['Patient_ID', 'GP_ID', 'Postcode']], 'Postcode',
+                                   ref['lookup'], ref['imd'], imd_version)
+    counts = dep.summarise_matches(enriched, ref['lookup_path'], ref['imd_path'],
                                    imd_version, group_col='GP_ID')
-    note = (f"Deprivation: IMD {imd_version} added to Patients sheet - "
-            f"{counts['matched']} of {counts['provided']} patients with a postcode matched "
-            f"(postcode lookup: {ref['lookup_path'].name}). "
-            f"See Deprivation_Match_Status for why any are blank.")
-    return patients_df, note
+
+    # Postcode is already on the Patients table, so it isn't repeated here.
+    deprivation_df = enriched.drop(columns=['Postcode'])
+
+    patients_df = patients_df.copy()
+    for field in PATIENT_IMD_FIELDS:
+        col = f'IMD{imd_version}_{field}'
+        patients_df[col] = enriched[col]
+
+    note = (f"Deprivation: IMD {imd_version} - {counts['matched']} of {counts['provided']} "
+            f"patients with a postcode matched (postcode lookup: {ref['lookup_path'].name}). "
+            f"Decile on the Patients sheet; full fields and match status on the Deprivation sheet.")
+    return patients_df, deprivation_df, note
 
 
 def run(gp_sources, deprivation=False, imd_version=dep.IMD_VERSION):
     """Clean every GP file in gp_sources and save the combined CSVs + workbook.
     gp_sources: list of {'gp_id': ..., 'source_file': ...} (paths may be
     relative to the repository folder).
-    deprivation: if True, add LSOA + IMD fields to the patients table."""
+    deprivation: if True, add the IMD decile to the patients table and save a
+    separate deprivation table (LSOA, match status, all chosen IMD fields)."""
     # Cheap check up front so a missing lookup/IMD file stops the run before
     # any cleaning, not after it.
     if deprivation:
-        dep.preflight(imd_version)
+        dep.preflight(imd_version, required_outputs=PATIENT_IMD_FIELDS)
 
     gp_sources = [
         {**gp, 'source_file': str(BASE_DIR / gp['source_file'])} for gp in gp_sources
@@ -668,11 +686,18 @@ def run(gp_sources, deprivation=False, imd_version=dep.IMD_VERSION):
         )
 
     # ---------- 8.5 Deprivation indices (optional, --deprivation) ----------
+    deprivation_csv = OUTPUT_DIR / 'copd_deprivation.csv'
     if deprivation:
-        tables['patients'], deprivation_note = add_deprivation_to_patients(patients_df, imd_version)
-        patients_df = tables['patients']
+        patients_df, deprivation_df, deprivation_note = build_deprivation_table(patients_df, imd_version)
+        # Deprivation table goes straight after Patients (sheet order follows this dict).
+        tables = {'patients': patients_df, 'deprivation': deprivation_df,
+                  **{k: v for k, v in tables.items() if k != 'patients'}}
     else:
         deprivation_note = "Deprivation: not run (use run_pipeline.py --deprivation to add IMD fields)."
+        # Don't leave a deprivation CSV from an earlier run next to fresh outputs.
+        if deprivation_csv.exists():
+            deprivation_csv.unlink()
+            print(f"Removed old {deprivation_csv.name} (deprivation not run this time).")
 
     # ---------- 9. Save + summary ----------
     # CSVs kept as-is for the pipeline/version control; the Excel workbook below

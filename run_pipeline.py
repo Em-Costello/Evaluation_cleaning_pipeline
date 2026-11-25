@@ -8,8 +8,8 @@ run_pipeline.py - run the whole COPD cleaning pipeline in one command.
        with one report listing everything to fix, if any file has a problem.
     3. Flattens each extract to evaluation_data/flattened/<name>.csv.
     4. Runs clean_copd_dataset.py on all of them and saves the CSVs + workbook.
-       With --deprivation, LSOA + IMD fields are added to the Patients table
-       (see deprivation.py). The deprivation files are checked BEFORE step 1,
+       With --deprivation, the IMD decile is added to the Patients table and a
+       separate Deprivation table/sheet is saved (see deprivation.py). The deprivation files are checked BEFORE step 1,
        so a missing lookup/IMD file stops the run straight away.
 
 To add a surgery: drop its .xlsx into evaluation_data/raw/ with its GP code in
@@ -55,14 +55,15 @@ def main():
     parser.add_argument("--sheet", default=None, help="Sheet name (default: active sheet)")
     parser.add_argument("--check-only", action="store_true", help="Run the checks only")
     parser.add_argument("--deprivation", action="store_true",
-                        help="Add LSOA + Index of Multiple Deprivation fields to the Patients table")
+                        help="Add the IMD decile to Patients and save a separate Deprivation table")
     parser.add_argument("--imd-version", type=int, default=dep.IMD_VERSION,
                         help=f"IMD version for --deprivation (default: {dep.IMD_VERSION})")
     args = parser.parse_args()
 
     if args.deprivation:
         try:
-            lookup_path, imd_path = dep.preflight(args.imd_version)
+            lookup_path, imd_path = dep.preflight(args.imd_version,
+                                                  required_outputs=clean.PATIENT_IMD_FIELDS)
         except dep.DeprivationSetupError as e:
             sys.exit(f"Stopped: deprivation setup problem - {e}")
         print(f"Deprivation: IMD {args.imd_version} "
