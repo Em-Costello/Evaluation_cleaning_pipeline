@@ -6,8 +6,14 @@ postcode or LSOA column.
 
     postcode / LSOA  ->  LSOA 2021 code  ->  IMD fields
 
-Standalone for now (runs separately from the main pipeline) so the methods can
-be tested on the test dataset:
+Two ways to run it:
+
+  1. As part of the main pipeline (adds IMD fields to the Patients table):
+
+    python run_pipeline.py --deprivation
+    python run_pipeline.py --deprivation --imd-version 2025
+
+  2. On its own, on any file with a postcode/LSOA column (useful for testing):
 
     python deprivation.py
     python deprivation.py --input path/to/file.xlsx --column Postcode --id-column none
@@ -40,9 +46,9 @@ LSOAs or other row-level values are printed.
 #     score, rank and decile; switch on more (income, employment, health,
 #     etc.) by changing 'No' to 'Yes' - no code change needed.
 #   - OUTPUT_FILE -> where the enriched CSV is written.
-#   - Later, when merged into the pipeline, these become command line
-#     arguments (argparse), e.g. --deprivation --imd-version 2025. A basic
-#     argparse is already included for testing.
+#   - In the pipeline these come from run_pipeline.py's command line
+#     (--deprivation --imd-version 2025). The standalone run has its own
+#     argparse (see main() at the bottom).
 #
 # -----------------------------------------------------------------------------
 # 1. LOCATE THE POSTCODE LOOKUP FILE (version-agnostic)
@@ -195,24 +201,32 @@ LSOAs or other row-level values are printed.
 #     once merged, also add as a sheet in the formatted Excel workbook.
 #
 # -----------------------------------------------------------------------------
-# 12. STRUCTURE FOR MERGING INTO THE PIPELINE LATER
+# 12. HOW IT PLUGS INTO THE PIPELINE
 # -----------------------------------------------------------------------------
 #   Each step is a function so the main pipeline can import them:
 #       check_imd_version(version)
 #       find_latest_lookup(folder)            -> Path
+#       find_imd_file(version, folder)        -> Path
+#       preflight(version)                    -> (lookup path, IMD path)
 #       load_postcode_lookup(path)            -> DataFrame (key -> lsoa21cd)
 #       load_imd(version, folder, mapping)    -> (DataFrame indexed by LSOA, Path)
+#       load_reference_data(version)          -> dict of the above, loaded once
 #       clean_and_classify(series)            -> (cleaned, input type)
 #       add_deprivation(df, column, lookup, imd, version)
 #                                             -> df with IMD + status cols
-#       summarise_matches(df, ...)            -> prints aggregate counts
+#       summarise_matches(df, ..., group_col) -> prints aggregate counts
 #       read_input(path) / collapse_to_patients(df, id_col, col)
-#   - Load lookup + IMD ONCE outside any per-GP loop (they are large).
-#   - In clean_copd_dataset.py: call add_deprivation(patients_df, 'Postcode', ...)
-#     only when the --deprivation flag is set; prefix messages with [gp_id]
-#     if run per GP.
-#   - Input from Excel as well as CSV: choose reader by file suffix
-#     (.csv -> read_csv, .xlsx -> read_excel), always dtype=str.
+#   - run_pipeline.py --deprivation calls preflight() BEFORE the checks/
+#     flatten/clean steps, so a missing lookup or IMD file stops the run
+#     straight away instead of after all the cleaning.
+#   - clean_copd_dataset.run() then loads the lookup + IMD ONCE and calls
+#     add_deprivation() on the COMBINED patients table (all GPs together),
+#     not inside the per-GP loop. The summary is broken down by GP_ID so a
+#     surgery with a poor match rate is easy to spot.
+#   - DeprivationSetupError is a ValueError, so the pipeline's existing
+#     'PIPELINE STOPPED' handling catches it.
+#   - Input from Excel as well as CSV (standalone run): choose reader by file
+#     suffix (.csv -> read_csv, .xlsx -> read_excel), always dtype=str.
 #
 # =============================================================================
 
@@ -230,8 +244,6 @@ import pandas as pd
 # 0. CONFIG
 # =============================================================================
 
-# All paths are resolved relative to this script's folder, so the pipeline
-# works no matter which folder the terminal is in.
 BASE_DIR = Path(__file__).resolve().parent
 FLAT_DATA_DIR = BASE_DIR / 'evaluation_data' / 'flattened'
 MAPPING_DIR = BASE_DIR / 'mapping_files'
@@ -251,7 +263,7 @@ LOOKUP_GLOB = 'PCD_OA21_LSOA21_*_LU.*'
 LOOKUP_POSTCODE_COLS = ['pcds', 'pcd7', 'pcd8']   # first one present is used
 LOOKUP_LSOA_COL = 'lsoa21cd'
 LOOKUP_TERM_COL = 'doterm'
-LOOKUP_LSOA_YEAR = 2021                           # which LSOA vintage the lookup gives
+LOOKUP_LSOA_YEAR = 2021                           # which LSOA version the lookup gives
 
 IMD_CONFIG = {
     2025: {'file_pattern': 'IoD2025_*.csv',
@@ -288,8 +300,9 @@ ALL_STATUSES = [STATUS_MATCHED, STATUS_MATCHED_TERM, STATUS_MISSING, STATUS_INVA
                 STATUS_PC_NOT_FOUND, STATUS_OUTSIDE_ENGLAND, STATUS_LSOA_NOT_IN_IMD]
 
 
-class DeprivationSetupError(Exception):
-    '''Setup problem (missing file/column, unsupported version). Stops the run.'''
+class DeprivationSetupError(ValueError):
+    '''Setup problem (missing file/column, unsupported version). Stops the run.
+    A ValueError so the main pipeline's existing error handling catches it.'''
 
 
 # =============================================================================
@@ -437,16 +450,20 @@ def load_postcode_lookup(path: Path) -> pd.DataFrame:
 # 7. LOAD THE IMD FILE
 # =============================================================================
 
-def load_imd(version: int, folder: Path, mapping_file: Path) -> tuple:
-    '''Returns (DataFrame indexed by LSOA code with IMD<version>_* columns, path).'''
+def find_imd_file(version: int, folder: Path) -> Path:
     cfg = IMD_CONFIG[version]
-
     matches = sorted(folder.glob(cfg['file_pattern']))
     if len(matches) != 1:
         raise DeprivationSetupError(
             f'Expected exactly one IMD {version} file matching {cfg["file_pattern"]} '
             f'in {folder}, found {len(matches)}: {[p.name for p in matches]}')
-    imd_path = matches[0]
+    return matches[0]
+
+
+def load_imd(version: int, folder: Path, mapping_file: Path) -> tuple:
+    '''Returns (DataFrame indexed by LSOA code with IMD<version>_* columns, path).'''
+    cfg = IMD_CONFIG[version]
+    imd_path = find_imd_file(version, folder)
 
     # Which fields, and what to call them
     if not mapping_file.exists():
@@ -500,6 +517,36 @@ def load_imd(version: int, folder: Path, mapping_file: Path) -> tuple:
             converted = converted.round().astype('Int64')
         out[col] = converted
     return out, imd_path
+
+
+# =============================================================================
+# PIPELINE ENTRY POINTS
+# =============================================================================
+
+def preflight(version: int, folder: Path = DEPRIVATION_MAPPING_DIR,
+              mapping_file: Path = IMD_FIELD_MAPPING_FILE) -> tuple:
+    '''Cheap checks (no big files loaded): version supported, lookup + IMD
+    file + field mapping all present. Returns (lookup path, IMD path).
+    Raises DeprivationSetupError if anything is missing.'''
+    check_imd_version(version)
+    lookup_path = find_latest_lookup(folder)
+    imd_path = find_imd_file(version, folder)
+    if not mapping_file.exists():
+        raise DeprivationSetupError(f'IMD field mapping file not found: {mapping_file}')
+    return lookup_path, imd_path
+
+
+def load_reference_data(version: int, folder: Path = DEPRIVATION_MAPPING_DIR,
+                        mapping_file: Path = IMD_FIELD_MAPPING_FILE) -> dict:
+    '''Load the postcode lookup and IMD table once, for reuse.'''
+    check_imd_version(version)
+    lookup_path = find_latest_lookup(folder)
+    print(f'Loading postcode lookup: {lookup_path.name} (can take a minute)')
+    lookup = load_postcode_lookup(lookup_path)
+    print(f'Loading IMD {version}')
+    imd, imd_path = load_imd(version, folder, mapping_file)
+    return {'lookup': lookup, 'imd': imd,
+            'lookup_path': lookup_path, 'imd_path': imd_path}
 
 
 # =============================================================================
@@ -577,7 +624,10 @@ def add_deprivation(df: pd.DataFrame, column: str, lookup: pd.DataFrame,
 # =============================================================================
 
 def summarise_matches(df: pd.DataFrame, lookup_path: Path, imd_path: Path,
-                      version: int) -> None:
+                      version: int, group_col: Optional[str] = None) -> dict:
+    '''Prints aggregate counts only. If group_col is given (e.g. 'GP_ID'),
+    also prints the match rate per group and warns per group.
+    Returns {'matched': n, 'provided': n} for use in reports.'''
     n = len(df)
     print('\n' + '=' * 60)
     print(f'DEPRIVATION SUMMARY (IMD {version})')
@@ -607,6 +657,20 @@ def summarise_matches(df: pd.DataFrame, lookup_path: Path, imd_path: Path,
             print('!' * 60)
     else:
         print('\nWARNING: no rows had a postcode or LSOA value.')
+
+    if group_col and group_col in df.columns:
+        print(f'\nMatch rate by {group_col}:')
+        is_provided = df[INPUT_TYPE_COL] != TYPE_MISSING
+        is_matched = df[STATUS_COL].isin([STATUS_MATCHED, STATUS_MATCHED_TERM])
+        by_group = pd.DataFrame({'provided': is_provided, 'matched': is_matched,
+                                 group_col: df[group_col]}).groupby(group_col).sum()
+        for g, row in by_group.iterrows():
+            p, m = int(row['provided']), int(row['matched'])
+            rate_txt = f'{m / p:6.1%}' if p else '   n/a'
+            print(f'  [{g}] {m:>6} of {p:<6} matched ({rate_txt})')
+            if p and m / p < MATCH_RATE_WARNING:
+                print(f'  [{g}] WARNING: match rate below {MATCH_RATE_WARNING:.0%} for this surgery.')
+    return {'matched': matched, 'provided': provided}
 
 
 # =============================================================================
@@ -691,15 +755,9 @@ def main(argv=None) -> pd.DataFrame:
     if args.id_column:
         df = collapse_to_patients(df, args.id_column, args.column)
 
-    lookup_path = find_latest_lookup(DEPRIVATION_MAPPING_DIR)
-    print(f'Loading postcode lookup: {lookup_path.name} (can take a minute)')
-    lookup = load_postcode_lookup(lookup_path)
-
-    print(f'Loading IMD {args.imd_version}')
-    imd, imd_path = load_imd(args.imd_version, DEPRIVATION_MAPPING_DIR, IMD_FIELD_MAPPING_FILE)
-
-    result = add_deprivation(df, args.column, lookup, imd, args.imd_version)
-    summarise_matches(result, lookup_path, imd_path, args.imd_version)
+    ref = load_reference_data(args.imd_version)
+    result = add_deprivation(df, args.column, ref['lookup'], ref['imd'], args.imd_version)
+    summarise_matches(result, ref['lookup_path'], ref['imd_path'], args.imd_version)
 
     out_path = args.output or OUTPUT_DIR / f'{args.input.stem}_deprivation_IMD{args.imd_version}.csv'
     out_path.parent.mkdir(parents=True, exist_ok=True)
