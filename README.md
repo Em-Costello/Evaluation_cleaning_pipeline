@@ -36,6 +36,8 @@ python run_pipeline.py
 
 To run only the checks (e.g. when a new extract arrives): `python run_pipeline.py --check-only`. To add a surgery, drop its file into `evaluation_data/raw/` - no code changes needed.
 
+To also add deprivation scores (IMD 2025) to the Patients table: `python run_pipeline.py --deprivation`. This needs two reference files in `mapping_files/deprivation_indices/` first - see [3.10 Deprivation indices](#310-deprivation-indices-optional).
+
 **Before running:**
 - Make sure `copd_combined_output.xlsx` isn't currently open in Excel — the script needs to overwrite it, which will fail if it's open elsewhere.
 - All data stays on your local machine; nothing is uploaded or sent anywhere by this pipeline.
@@ -235,11 +237,42 @@ After all configured GP files are processed, each of the nine tables is concaten
 
 At the end of the run, the script prints: per-table row counts (from the CSV save step), any cross-GP duplicate `Patient_ID` warning, total GPs processed, total patients, and a value count of `Cardiovascular_Disease` (temporary — pending the outstanding mapping work noted in 3.2).
 
+### 3.10 Deprivation indices (optional)
+
+Run with `python run_pipeline.py --deprivation` to add each patient's Lower Layer Super Output Area (LSOA) and Index of Multiple Deprivation (IMD) fields to the Patients table. The logic lives in `deprivation.py`.
+
+**Reference files needed** in `mapping_files/deprivation_indices/` 
+
+When ONS publishes a newer postcode lookup, drop it in the same folder. The pipeline picks the newest one by the date in its file name (e.g. `FEB25`), so no code changes are needed (in theory). The file used is printed in the run output and named on the workbook Summary sheet.
+
+**How it works:**
+1. Before anything else runs, the pipeline checks the reference files exist and the IMD version is supported, so a missing file stops the run straight away rather than after cleaning.
+2. After all surgeries are cleaned and combined, each patient's `Postcode` is cleaned (upper-cased, all spaces removed) and matched against the lookup cleaned the same way. Matching does not depend on how many spaces or characters the postcode has.
+3. A value that is already an LSOA code (e.g. `E01000001`) is used directly.
+4. The LSOA is matched to the IMD file and the chosen fields are added.
+
+**Columns added to the Patients table:**
+- `LSOA21CD` - the patient's 2021 LSOA code.
+- `Deprivation_Input_Type` - what the postcode value looked like: `Postcode`, `LSOA`, `Invalid` or `Missing`.
+- `Deprivation_Match_Status` - whether IMD fields were found, and if not, why: `Matched`, `Matched (terminated postcode)`, `Missing`, `Invalid format`, `Postcode not found in lookup`, `Outside England (no English IMD)`, `LSOA not found in IMD file`.
+- `IMD2025_Score`, `IMD2025_Rank`, `IMD2025_Decile` by default (rank and decile: 1 = most deprived). The year prefix stops fields from different IMD versions being confused.
+
+**Notes:**
+- Postcodes that can't be matched never stop the pipeline - they are flagged in `Deprivation_Match_Status` and their IMD fields are left blank.
+- Terminated (no longer used) postcodes are still matched, because GP records often hold older addresses. They are flagged as `Matched (terminated postcode)`.
+- The IMD is England-only, so Welsh, Scottish, Northern Irish, Channel Islands and Isle of Man postcodes are flagged as `Outside England`.
+- The run prints counts by match status and the match rate per GP, with a warning if fewer than 90% of patients with a postcode were matched. No postcodes or other patient-level values are printed.
+- To add more IMD fields (income, employment, health, crime, etc.), open `imd_field_mapping.csv` and change `include` from `No` to `Yes` for the fields you want.
+- Only IMD 2025 is supported for now. IMD 2019 uses 2011 LSOAs, which the current postcode lookup doesn't provide.
+
+`deprivation.py` can also be run on its own on any CSV/Excel file with a postcode or LSOA column (`python deprivation.py --input <file> --column Postcode`). The output is written to `cleaned_data/deprivation/`.
+
 ### Usage
 
 ```bash
 python run_pipeline.py               # checks -> flatten -> clean, in one go
 python run_pipeline.py --check-only  # checks only
+python run_pipeline.py --deprivation # also add LSOA + IMD 2025 fields to Patients
 ```
 
 The individual steps can still be run on their own:
@@ -248,6 +281,7 @@ The individual steps can still be run on their own:
 python check_inputs.py <input_file_path>.xlsx
 python flatten_headers.py <input_file_path>.xlsx <output_file_path>.csv
 python clean_copd_dataset.py
+python deprivation.py --input <input_file_path>.csv --column Postcode
 ```
 
 ```
@@ -277,6 +311,7 @@ clean_copd_dataset.py  (process_gp_file, once per surgery)
 Combine across all GP surgeries
       |
       |-- Warn on cross-GP duplicate Patient_IDs
+      |-- (--deprivation) Postcode -> LSOA -> IMD on Patients table
       |
       v
 Save: 9 CSVs + 1 formatted Excel workbook (Summary + 9 sheets)
