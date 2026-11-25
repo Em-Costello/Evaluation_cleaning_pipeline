@@ -8,6 +8,9 @@ run_pipeline.py - run the whole COPD cleaning pipeline in one command.
        with one report listing everything to fix, if any file has a problem.
     3. Flattens each extract to evaluation_data/flattened/<name>.csv.
     4. Runs clean_copd_dataset.py on all of them and saves the CSVs + workbook.
+       With --deprivation, LSOA + IMD fields are added to the Patients table
+       (see deprivation.py). The deprivation files are checked BEFORE step 1,
+       so a missing lookup/IMD file stops the run straight away.
 
 To add a surgery: drop its .xlsx into evaluation_data/raw/ with its GP code in
 the file name. No code changes needed.
@@ -17,6 +20,8 @@ Usage:
     python run_pipeline.py --check-only          # stop after the checks
     python run_pipeline.py --raw-dir some/folder
     python run_pipeline.py --sheet "Sheet1"
+    python run_pipeline.py --deprivation        # also add IMD 2025 fields
+    python run_pipeline.py --deprivation --imd-version 2025
 """
 
 import argparse
@@ -25,6 +30,7 @@ from pathlib import Path
 
 import check_inputs
 import clean_copd_dataset as clean
+import deprivation as dep
 from flatten_headers import flatten_workbook
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -48,7 +54,19 @@ def main():
                         help="Folder of raw .xlsx extracts (default: evaluation_data/raw/)")
     parser.add_argument("--sheet", default=None, help="Sheet name (default: active sheet)")
     parser.add_argument("--check-only", action="store_true", help="Run the checks only")
+    parser.add_argument("--deprivation", action="store_true",
+                        help="Add LSOA + Index of Multiple Deprivation fields to the Patients table")
+    parser.add_argument("--imd-version", type=int, default=dep.IMD_VERSION,
+                        help=f"IMD version for --deprivation (default: {dep.IMD_VERSION})")
     args = parser.parse_args()
+
+    if args.deprivation:
+        try:
+            lookup_path, imd_path = dep.preflight(args.imd_version)
+        except dep.DeprivationSetupError as e:
+            sys.exit(f"Stopped: deprivation setup problem - {e}")
+        print(f"Deprivation: IMD {args.imd_version} "
+              f"(lookup: {lookup_path.name}, IMD file: {imd_path.name})\n")
 
     if not args.check_only and output_is_locked(clean.OUTPUT_XLSX):
         sys.exit(f"{clean.OUTPUT_XLSX.name} is open in Excel - close it and run again.")
@@ -76,7 +94,7 @@ def main():
 
     print("\nSTEP 3/3  Cleaning and combining\n")
     try:
-        clean.run(gp_sources)
+        clean.run(gp_sources, deprivation=args.deprivation, imd_version=args.imd_version)
     except ValueError as e:
         sys.exit(f"\nPIPELINE STOPPED:\n{e}")
     print(f"\nDone. Workbook: {clean.OUTPUT_XLSX}")
