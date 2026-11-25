@@ -241,7 +241,13 @@ At the end of the run, the script prints: per-table row counts (from the CSV sav
 
 Run with `python run_pipeline.py --deprivation` to look up each patient's Lower Layer Super Output Area (LSOA) and Index of Multiple Deprivation (IMD) from their postcode. The logic lives in `deprivation.py`.
 
-**Reference files needed** in `mapping_files/deprivation_indices/`
+**Reference files needed** in `mapping_files/deprivation_indices/` (not stored in the repository - they are large public files, download them and drop them in):
+
+| File | What it is | Example file name |
+|---|---|---|
+| ONS postcode lookup | Postcode -> 2021 LSOA. Can be the `.zip` as downloaded or the extracted `.csv`. | `PCD_OA21_LSOA21_MSOA21_LAD_FEB25_UK_LU.zip` |
+| English Indices of Deprivation 2025 | LSOA -> IMD scores, ranks and deciles | `IoD2025_All_Ranks_Scores_Deciles_Population_Denominators.csv` |
+| `imd_field_mapping.csv` | Which IMD fields to add and what to call them (in the repository) | - |
 
 When ONS publishes a newer postcode lookup, drop it in the same folder. The pipeline picks the newest one by the date in its file name (e.g. `FEB25`), so no code changes are needed. The file used is printed in the run output and named on the workbook Summary sheet.
 
@@ -269,10 +275,11 @@ When the pipeline is run without `--deprivation`, there is no Deprivation sheet,
 - Terminated (no longer used) postcodes are still matched, because GP records often hold older addresses. They are flagged as `Matched (terminated postcode)`.
 - The IMD is England-only, so Welsh, Scottish, Northern Irish, Channel Islands and Isle of Man postcodes are flagged as `Outside England`.
 - The run prints counts by match status and the match rate per GP, with a warning if fewer than 90% of patients with a postcode were matched. No postcodes or other patient-level values are printed.
+- The same counts are saved to **`qa_reports/deprivation_report.txt`**, broken down by GP. For every non-match that occurs, it explains what it usually means, what to do, and where to find those patients: on the Deprivation sheet, filter `Deprivation_Match_Status`, then look up the `Patient_ID` on the Patients sheet to see the postcode. The report holds counts only, no postcodes or NHS numbers. If the pipeline is run without `--deprivation`, any old report is deleted.
 - To add more IMD fields (income, employment, health, crime, etc.) to the Deprivation table, open `imd_field_mapping.csv` and change `include` from `No` to `Yes` for the fields you want. `Decile` must stay `Yes`, because it's the field added to Patients - the run stops at the start if it isn't.
 - Only IMD 2025 is supported for now. IMD 2019 uses 2011 LSOAs, which the current postcode lookup doesn't provide.
 
-`deprivation.py` can also be run on its own on any CSV/Excel file with a postcode or LSOA column (`python deprivation.py --input <file> --column Postcode`). The output is written to `cleaned_data/deprivation/`.
+`deprivation.py` can also be run on its own on any CSV/Excel file with a postcode or LSOA column (`python deprivation.py --input <file> --column Postcode`). The output is written to `cleaned_data/deprivation/`, and its report to `qa_reports/<input name>_deprivation_report.txt`.
 
 ### Usage
 

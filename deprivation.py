@@ -190,6 +190,9 @@ LSOAs or other row-level values are printed.
 #   - Do NOT print postcodes, LSOAs or any row-level data.
 #   - Warning threshold: if match rate < 90% (of rows that had a value), print
 #     a loud warning (suggests a wrong column or format issue) but continue.
+#   - Also saved as qa_reports/deprivation_report.txt: counts by status (overall
+#     and per GP), plus, for each kind of non-match, what it usually means and
+#     where to find those rows in the outputs. Counts only - no identifiers.
 #
 # -----------------------------------------------------------------------------
 # 11. OUTPUT
@@ -238,6 +241,7 @@ import argparse
 import re
 import sys
 import zipfile
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -253,6 +257,7 @@ FLAT_DATA_DIR = BASE_DIR / 'evaluation_data' / 'flattened'
 MAPPING_DIR = BASE_DIR / 'mapping_files'
 DEPRIVATION_MAPPING_DIR = MAPPING_DIR / 'deprivation_indices'
 OUTPUT_DIR = BASE_DIR / 'cleaned_data' / 'deprivation'
+REPORT_DIR = BASE_DIR / 'qa_reports'
 
 IMD_VERSION = 2025
 INPUT_FILE = FLAT_DATA_DIR / 'TEST_GP00.csv'
@@ -689,6 +694,119 @@ def summarise_matches(df: pd.DataFrame, lookup_path: Path, imd_path: Path,
 
 
 # =============================================================================
+# 10 (cont). QA REPORT FILE (aggregate counts + where to check)
+# =============================================================================
+
+# For each status that needs a look: (what it usually means, what to do).
+# Kept generic so the same text works for the pipeline and standalone runs.
+STATUS_GUIDANCE = {
+    STATUS_MISSING: (
+        'No postcode recorded for the patient.',
+        'Check the Postcode column in the raw GP extract for these patients. If the '
+        'surgery should hold a postcode, ask them to check the record.'),
+    STATUS_INVALID: (
+        "The value doesn't look like a UK postcode or LSOA code - e.g. a typo, a "
+        "partial postcode, extra characters, or text such as 'not known'.",
+        'Look at the Postcode value for these patients. Correct it at source if '
+        'possible, then re-run.'),
+    STATUS_PC_NOT_FOUND: (
+        'Looks like a valid postcode but is not in the ONS postcode lookup. Usually a '
+        'typo that still looks like a postcode, a postcode newer than the lookup '
+        'release, or a non-geographic postcode (e.g. a PO Box).',
+        'Check the Postcode value for typos. If several are affected, download the '
+        'newest ONS lookup into mapping_files/deprivation_indices/ - the pipeline '
+        'picks the newest automatically. Do not paste patient postcodes into online '
+        'lookup tools.'),
+    STATUS_OUTSIDE_ENGLAND: (
+        'The postcode is in Wales, Scotland, Northern Ireland, the Channel Islands or '
+        'the Isle of Man. The IMD covers England only, so there is no score.',
+        'Usually expected (e.g. surgeries near a border). No fix needed; these '
+        'patients cannot have an English IMD value.'),
+    STATUS_LSOA_NOT_IN_IMD: (
+        'The postcode was matched to an LSOA, but that LSOA is not in the IMD file. '
+        'Usually means the lookup and IMD file use different LSOA versions, or an '
+        'LSOA code was entered by hand incorrectly.',
+        'Check the IMD file is the 2025 release (2021 LSOAs) and the lookup gives '
+        '2021 LSOAs (lsoa21cd). If only a few rows, check the LSOA21CD value.'),
+    STATUS_MATCHED_TERM: (
+        'Matched, but the postcode has been terminated (is no longer in use). The '
+        'IMD value is still valid for that area.',
+        'No fix needed. A large number may mean addresses in the GP records are out '
+        'of date.'),
+}
+
+
+def format_deprivation_report(df: pd.DataFrame, lookup_path: Path, imd_path: Path,
+                              version: int, where_to_check: str,
+                              group_col: Optional[str] = None) -> str:
+    '''Plain-text QA report: counts by status (overall and per group), then
+    guidance for every non-matched status that occurs. Counts only - no
+    postcodes, LSOAs or patient identifiers.'''
+    n = len(df)
+    provided = int((df[INPUT_TYPE_COL] != TYPE_MISSING).sum())
+    matched = int(df[STATUS_COL].isin([STATUS_MATCHED, STATUS_MATCHED_TERM]).sum())
+    counts = df[STATUS_COL].value_counts().reindex(ALL_STATUSES, fill_value=0)
+
+    out = [f'DEPRIVATION CHECKS (IMD {version}) - {datetime.now():%d/%m/%Y %H:%M}', '=' * 60,
+           f'Postcode lookup : {lookup_path.name}',
+           f'IMD file        : {imd_path.name}',
+           f'Rows            : {n}']
+    if provided:
+        rate = matched / provided
+        flag = '' if rate >= MATCH_RATE_WARNING else f'   ! below {MATCH_RATE_WARNING:.0%}'
+        out.append(f'Matched         : {matched} of {provided} with a postcode/LSOA ({rate:.1%}){flag}')
+    else:
+        out.append('Matched         : no rows had a postcode or LSOA value')
+
+    out += ['', 'Match status', '-' * 60]
+    for s, c in counts.items():
+        out.append(f'  {s:<35}{c:>8}  ({c / n:6.1%})' if n else f'  {s:<35}{c:>8}')
+
+    if group_col and group_col in df.columns:
+        table = pd.crosstab(df[group_col], df[STATUS_COL]).reindex(columns=ALL_STATUSES, fill_value=0)
+        short = {STATUS_MATCHED: 'Matched', STATUS_MATCHED_TERM: 'Term.',
+                 STATUS_MISSING: 'Missing', STATUS_INVALID: 'Invalid',
+                 STATUS_PC_NOT_FOUND: 'PC n/f', STATUS_OUTSIDE_ENGLAND: 'Outside',
+                 STATUS_LSOA_NOT_IN_IMD: 'LSOA n/f'}
+        out += ['', f'By {group_col}', '-' * 60,
+                f'  {group_col:<8}' + ''.join(f'{short[s]:>9}' for s in ALL_STATUSES) + '   Rate']
+        for g, row in table.iterrows():
+            p = int(row.sum() - row[STATUS_MISSING])
+            m = int(row[STATUS_MATCHED] + row[STATUS_MATCHED_TERM])
+            rate_txt = f'{m / p:6.1%}' if p else '   n/a'
+            warn = '  !' if p and m / p < MATCH_RATE_WARNING else ''
+            out.append(f'  {str(g):<8}' + ''.join(f'{int(row[s]):>9}' for s in ALL_STATUSES)
+                       + f'  {rate_txt}{warn}')
+        out.append('  (Term. = matched via terminated postcode, PC n/f = postcode not found '
+                   'in lookup, LSOA n/f = LSOA not found in IMD file)')
+
+    to_check = [s for s in STATUS_GUIDANCE if counts[s] > 0]
+    out += ['', 'Where to check', '-' * 60, where_to_check]
+    if not to_check:
+        out += ['', 'Every row matched - nothing to check.']
+    for s in to_check:
+        meaning, action = STATUS_GUIDANCE[s]
+        out += ['', f"'{s}' - {counts[s]} row(s)",
+                f'  What it means: {meaning}',
+                f'  What to do:    {action}']
+
+    out += ['', '=' * 60,
+            'This report holds counts only - no postcodes, LSOAs or patient identifiers.']
+    return '\n'.join(out)
+
+
+def write_deprivation_report(df: pd.DataFrame, lookup_path: Path, imd_path: Path,
+                             version: int, path: Path, where_to_check: str,
+                             group_col: Optional[str] = None) -> Path:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(format_deprivation_report(df, lookup_path, imd_path, version,
+                                              where_to_check, group_col) + '\n', encoding='utf-8')
+    print(f'Deprivation report saved to {path}')
+    return path
+
+
+# =============================================================================
 # INPUT HELPERS
 # =============================================================================
 
@@ -778,6 +896,12 @@ def main(argv=None) -> pd.DataFrame:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     result.to_csv(out_path, index=False)
     print(f'\nWritten: {out_path}')
+
+    where = (f'Open {out_path.name} (in {out_path.parent.name}/) and filter the '
+             f'{STATUS_COL} column on the status below. The original value is in the '
+             f'{args.column} column.')
+    write_deprivation_report(result, ref['lookup_path'], ref['imd_path'], args.imd_version,
+                             REPORT_DIR / f'{args.input.stem}_deprivation_report.txt', where)
     return result
 
 

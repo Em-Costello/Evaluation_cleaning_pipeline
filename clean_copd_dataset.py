@@ -92,6 +92,8 @@ BASE_DIR = Path(__file__).resolve().parent
 MAPPING_DIR = BASE_DIR / 'mapping_files'
 OUTPUT_DIR = BASE_DIR / 'cleaned_data' / 'combined_data'
 OUTPUT_XLSX = OUTPUT_DIR / 'copd_combined_output.xlsx'
+QA_REPORT_DIR = BASE_DIR / 'qa_reports'
+DEPRIVATION_REPORT = QA_REPORT_DIR / 'deprivation_report.txt'
 
 # ---------- GP sources to process ----------
 # Only used when this script is run directly. run_pipeline.py builds this list
@@ -639,6 +641,12 @@ def build_deprivation_table(patients_df, imd_version):
                                    ref['lookup'], ref['imd'], imd_version)
     counts = dep.summarise_matches(enriched, ref['lookup_path'], ref['imd_path'],
                                    imd_version, group_col='GP_ID')
+    where = (f"Open {OUTPUT_XLSX.name} -> Deprivation sheet (or copd_deprivation.csv) and "
+             f"filter Deprivation_Match_Status on the status below; add a GP_ID filter to "
+             f"narrow to one surgery. The postcode for each Patient_ID is on the Patients "
+             f"sheet (Postcode column) - match on Patient_ID + GP_ID.")
+    dep.write_deprivation_report(enriched, ref['lookup_path'], ref['imd_path'], imd_version,
+                                 DEPRIVATION_REPORT, where, group_col='GP_ID')
 
     # Postcode is already on the Patients table, so it isn't repeated here.
     deprivation_df = enriched.drop(columns=['Postcode'])
@@ -650,7 +658,8 @@ def build_deprivation_table(patients_df, imd_version):
 
     note = (f"Deprivation: IMD {imd_version} - {counts['matched']} of {counts['provided']} "
             f"patients with a postcode matched (postcode lookup: {ref['lookup_path'].name}). "
-            f"Decile on the Patients sheet; full fields and match status on the Deprivation sheet.")
+            f"Decile on the Patients sheet; full fields and match status on the Deprivation sheet. "
+            f"Unmatched postcodes: see qa_reports/{DEPRIVATION_REPORT.name}.")
     return patients_df, deprivation_df, note
 
 
@@ -694,10 +703,11 @@ def run(gp_sources, deprivation=False, imd_version=dep.IMD_VERSION):
                   **{k: v for k, v in tables.items() if k != 'patients'}}
     else:
         deprivation_note = "Deprivation: not run (use run_pipeline.py --deprivation to add IMD fields)."
-        # Don't leave a deprivation CSV from an earlier run next to fresh outputs.
-        if deprivation_csv.exists():
-            deprivation_csv.unlink()
-            print(f"Removed old {deprivation_csv.name} (deprivation not run this time).")
+        # Don't leave deprivation outputs from an earlier run next to fresh outputs.
+        for old in (deprivation_csv, DEPRIVATION_REPORT):
+            if old.exists():
+                old.unlink()
+                print(f"Removed old {old.name} (deprivation not run this time).")
 
     # ---------- 9. Save + summary ----------
     # CSVs kept as-is for the pipeline/version control; the Excel workbook below
