@@ -1,0 +1,53 @@
+imd_version,source_column,output_name,include
+2025,Index of Multiple Deprivation (IMD) Score,Score,Yes
+2025,Index of Multiple Deprivation (IMD) Rank (where 1 is most deprived),Rank,Yes
+2025,Index of Multiple Deprivation (IMD) Decile (where 1 is most deprived 10% of LSOAs),Decile,Yes
+2025,Income Score (rate),Income_Score,No
+2025,Income Rank (where 1 is most deprived),Income_Rank,No
+2025,Income Decile (where 1 is most deprived 10% of LSOAs),Income_Decile,No
+2025,Employment Score (rate),Employment_Score,No
+2025,Employment Rank (where 1 is most deprived),Employment_Rank,No
+2025,Employment Decile (where 1 is most deprived 10% of LSOAs),Employment_Decile,No
+2025,"Education, Skills and Training Score",Education_Score,No
+2025,"Education, Skills and Training Rank (where 1 is most deprived)",Education_Rank,No
+2025,"Education, Skills and Training Decile (where 1 is most deprived 10% of LSOAs)",Education_Decile,No
+2025,Health Deprivation and Disability Score,Health_Score,No
+2025,Health Deprivation and Disability Rank (where 1 is most deprived),Health_Rank,No
+2025,Health Deprivation and Disability Decile (where 1 is most deprived 10% of LSOAs),Health_Decile,No
+2025,Crime Score,Crime_Score,No
+2025,Crime Rank (where 1 is most deprived),Crime_Rank,No
+2025,Crime Decile (where 1 is most deprived 10% of LSOAs),Crime_Decile,No
+2025,Barriers to Housing and Services Score,Barriers_Score,No
+2025,Barriers to Housing and Services Rank (where 1 is most deprived),Barriers_Rank,No
+2025,Barriers to Housing and Services Decile (where 1 is most deprived 10% of LSOAs),Barriers_Decile,No
+2025,Living Environment Score,Living_Environment_Score,No
+2025,Living Environment Rank (where 1 is most deprived),Living_Environment_Rank,No
+2025,Living Environment Decile (where 1 is most deprived 10% of LSOAs),Living_Environment_Decile,No
+2025,Income Deprivation Affecting Children Index (IDACI) Score (rate),IDACI_Score,No
+2025,Income Deprivation Affecting Children Index (IDACI) Rank (where 1 is most deprived),IDACI_Rank,No
+2025,Income Deprivation Affecting Children Index (IDACI) Decile (where 1 is most deprived 10% of LSOAs),IDACI_Decile,No
+2025,Income Deprivation Affecting Older People (IDAOPI) Score (rate),IDAOPI_Score,No
+2025,Income Deprivation Affecting Older People (IDAOPI) Rank (where 1 is most deprived),IDAOPI_Rank,No
+2025,Income Deprivation Affecting Older People (IDAOPI) Decile (where 1 is most deprived 10% of LSOAs),IDAOPI_Decile,No
+2025,Children and Young People Sub-domain Score,Sub_Children_Young_People_Score,No
+2025,Children and Young People Sub-domain Rank (where 1 is most deprived),Sub_Children_Young_People_Rank,No
+2025,Children and Young People Sub-domain Decile (where 1 is most deprived 10% of LSO,Sub_Children_Young_People_Decile,No
+2025,Adult Skills Sub-domain Score,Sub_Adult_Skills_Score,No
+2025,Adult Skills Sub-domain Rank (where 1 is most deprived),Sub_Adult_Skills_Rank,No
+2025,Adult Skills Sub-domain Decile (where 1 is most deprived 10% of LSOAs),Sub_Adult_Skills_Decile,No
+2025,Geographical Barriers Sub-domain Score,Sub_Geographical_Barriers_Score,No
+2025,Geographical Barriers Sub-domain Rank (where 1 is most deprived),Sub_Geographical_Barriers_Rank,No
+2025,Geographical Barriers Sub-domain Decile (where 1 is most deprived 10% of LSOAs),Sub_Geographical_Barriers_Decile,No
+2025,Wider Barriers Sub-domain Score,Sub_Wider_Barriers_Score,No
+2025,Wider Barriers Sub-domain Rank (where 1 is most deprived),Sub_Wider_Barriers_Rank,No
+2025,Wider Barriers Sub-domain Decile (where 1 is most deprived 10% of LSOAs),Sub_Wider_Barriers_Decile,No
+2025,Indoors Sub-domain Score,Sub_Indoors_Score,No
+2025,Indoors Sub-domain Rank (where 1 is most deprived),Sub_Indoors_Rank,No
+2025,Indoors Sub-domain Decile (where 1 is most deprived 10% of LSOAs),Sub_Indoors_Decile,No
+2025,Outdoors Sub-domain Score,Sub_Outdoors_Score,No
+2025,Outdoors Sub-domain Rank (where 1 is most deprived),Sub_Outdoors_Rank,No
+2025,Outdoors Sub-domain Decile (where 1 is most deprived 10% of LSOAs),Sub_Outdoors_Decile,No
+2025,Total population: mid 2022,Population_Total_mid2022,No
+2025,Dependent Children aged 0-15: mid 2022,Population_Children_0_15_mid2022,No
+2025,Older population aged 60 and over: mid 2022,Population_60_Plus_mid2022,No
+2025,Working age population 18-66 (for use with Employment Deprivation Domain): mid 2022,Population_Working_Age_18_66_mid2022,No
