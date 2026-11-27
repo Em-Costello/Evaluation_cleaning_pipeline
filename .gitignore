@@ -12,4 +12,5 @@ qa_reports/
 *.pyc
 
 !mapping_files/*.csv
+!mapping_files/deprivation_indices/*.csv
 !header_template.xlsx
